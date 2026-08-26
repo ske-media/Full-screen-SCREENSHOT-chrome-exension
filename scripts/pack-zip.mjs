@@ -23,10 +23,11 @@ mkdirSync(staging, { recursive: true });
 const keep = [
   "manifest.json",
   "background.js",
-  "content.js",
   "popup.html",
+  "popup.js",
   "editor.html",
-  "assets",
+  "editor.js",
+  "ui.css",
   "icons",
 ];
 
@@ -50,6 +51,9 @@ writeFileSync(
     "2. Activez le Mode développeur (en haut à droite)",
     "3. Cliquez sur « Charger l'extension non empaquetée »",
     "4. Sélectionnez CE dossier (celui qui contient manifest.json)",
+    "",
+    "Conseil : copiez le dossier hors de Téléchargements (ex. Documents),",
+    "sinon Windows peut le déplacer et Chrome affichera ERR_FILE_NOT_FOUND.",
     "",
     "Cliquez ensuite sur l'icône de l'extension, puis sur",
     "« Capturer la page entière ».",

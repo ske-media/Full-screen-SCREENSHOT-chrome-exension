@@ -37,7 +37,23 @@ await esbuild.build({
   logLevel: "info",
 });
 
-const required = ["manifest.json", "background.js", "content.js", "popup.html", "editor.html"];
+const stabilize = spawnSync(process.execPath, [join(root, "scripts/stabilize-ui.mjs")], {
+  cwd: root,
+  stdio: "inherit",
+});
+if (stabilize.status !== 0) {
+  process.exit(stabilize.status ?? 1);
+}
+
+const required = [
+  "manifest.json",
+  "background.js",
+  "popup.html",
+  "popup.js",
+  "editor.html",
+  "editor.js",
+  "ui.css",
+];
 for (const file of required) {
   if (!existsSync(join(dist, file))) {
     throw new Error(`Fichier manquant après build : dist/${file}`);

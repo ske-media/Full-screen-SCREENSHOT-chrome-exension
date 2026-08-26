@@ -10,6 +10,20 @@ let capturing = false;
 type StartMessage = { type: "START_CAPTURE"; tabId?: number };
 type StatusMessage = { type: "GET_CAPTURE_STATUS" };
 
+const KEEP_ALIVE_ALARM = "fpc-keepalive";
+
+function ensureKeepAlive() {
+  void chrome.alarms.create(KEEP_ALIVE_ALARM, { periodInMinutes: 0.5 });
+}
+
+chrome.runtime.onInstalled.addListener(ensureKeepAlive);
+chrome.runtime.onStartup.addListener(ensureKeepAlive);
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name !== KEEP_ALIVE_ALARM) return;
+  void chrome.storage.session.set({ fpcPing: Date.now() });
+});
+ensureKeepAlive();
+
 chrome.runtime.onMessage.addListener(
   (message: StartMessage | StatusMessage, _sender, sendResponse) => {
     if (!message?.type) return;
