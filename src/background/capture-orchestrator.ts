@@ -38,13 +38,20 @@ async function runInPage<T>(
   tabId: number,
   func: () => T | Promise<T>,
 ): Promise<T> {
-  const results = await chrome.scripting.executeScript({
-    target: { tabId },
-    func,
-  });
-  const first = results[0];
-  if (!first) throw new Error("La page n'a pas répondu.");
-  return first.result as T;
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func,
+    });
+    const first = results[0];
+    if (!first) throw new Error("La page n'a pas répondu.");
+    return first.result as T;
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `Impossible d'agir sur cette page (${detail}). Rechargez l'onglet, puis réessayez.`,
+    );
+  }
 }
 
 async function runInPageArg<A, T>(
@@ -52,14 +59,21 @@ async function runInPageArg<A, T>(
   func: (arg: A) => T | Promise<T>,
   arg: A,
 ): Promise<T> {
-  const results = await chrome.scripting.executeScript({
-    target: { tabId },
-    func,
-    args: [arg],
-  });
-  const first = results[0];
-  if (!first) throw new Error("La page n'a pas répondu.");
-  return first.result as T;
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func,
+      args: [arg],
+    });
+    const first = results[0];
+    if (!first) throw new Error("La page n'a pas répondu.");
+    return first.result as T;
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `Impossible d'agir sur cette page (${detail}). Rechargez l'onglet, puis réessayez.`,
+    );
+  }
 }
 
 function dataUrlToBlob(dataUrl: string): Blob {

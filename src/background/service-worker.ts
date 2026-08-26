@@ -1,6 +1,7 @@
 /**
  * Service worker Manifest V3.
- * Reçoit la commande du popup, lance la capture, ouvre l'éditeur.
+ * Le canal onMessage reste ouvert (return true) jusqu'à la fin de la capture
+ * pour empêcher Chrome de tuer le worker dès que le popup se ferme.
  */
 import { captureFullPage } from "./capture-orchestrator";
 
@@ -30,64 +31,57 @@ chrome.runtime.onMessage.addListener(
     void chrome.action.setBadgeText({ text: "…" });
 
     runCapture(message.tabId)
+      .then((captureId) => {
+        sendResponse({ ok: true, captureId });
+      })
       .catch((err: unknown) => {
         const text = err instanceof Error ? err.message : String(err);
         void chrome.storage.local.set({ lastCaptureError: text });
-        void notify({ type: "CAPTURE_ERROR", message: text });
-        void openEditor({ error: text });
         void chrome.action.setBadgeBackgroundColor({ color: "#b91c1c" });
         void chrome.action.setBadgeText({ text: "ERR" });
+        void openEditor({ error: text });
+        sendResponse({ ok: false, error: text });
       })
       .finally(() => {
         capturing = false;
         setTimeout(() => {
           void chrome.action.setBadgeText({ text: "" });
-        }, 5000);
+        }, 4000);
       });
 
-    sendResponse({ ok: true });
+    return true;
   },
 );
 
 async function runCapture(tabId?: number) {
-  const stopKeepAlive = startKeepAlive();
-  try {
-    // Laisse le popup se fermer pour que l'onglet soit vraiment visible.
-    await delay(350);
-
-    const tab = tabId ? await chrome.tabs.get(tabId) : await resolveTargetTab();
-    if (!tab?.id) {
-      throw new Error("Aucun onglet actif à capturer.");
-    }
-
-    const result = await captureFullPage(tab, ({ current, total }) => {
-      const pct = total > 0 ? Math.round((current / total) * 100) : 0;
-      void chrome.action.setBadgeText({ text: `${Math.min(99, pct)}` });
-    });
-
-    await notify({ type: "CAPTURE_DONE", captureId: result.id });
-    await openEditor({ id: result.id });
-  } finally {
-    stopKeepAlive();
+  const tab = tabId ? await chrome.tabs.get(tabId) : await resolveTargetTab();
+  if (!tab?.id) {
+    throw new Error("Aucun onglet actif à capturer.");
   }
-}
 
-function startKeepAlive() {
-  const timer = setInterval(() => {
-    void chrome.runtime.getPlatformInfo();
-  }, 4000);
-  return () => clearInterval(timer);
-}
+  const result = await captureFullPage(tab, ({ current, total, message }) => {
+    const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+    void chrome.action.setBadgeText({ text: `${Math.min(99, pct)}` });
+    void chrome.runtime
+      .sendMessage({
+        type: "CAPTURE_PROGRESS",
+        current,
+        total,
+        message,
+      })
+      .catch(() => undefined);
+  });
 
-function delay(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  await openEditor({ id: result.id });
+  return result.id;
 }
 
 function editorPageUrl(params: { id?: string; error?: string }) {
-  const url = new URL(chrome.runtime.getURL("editor.html"));
+  const base = chrome.runtime.getURL("editor.html");
+  const url = new URL(base);
   if (params.id) url.searchParams.set("id", params.id);
   if (params.error) url.searchParams.set("error", params.error);
-  return url.toString();
+  return url.href;
 }
 
 async function openEditor(params: { id?: string; error?: string }) {
@@ -104,8 +98,4 @@ async function resolveTargetTab() {
   }
   const all = await chrome.tabs.query({ lastFocusedWindow: true });
   return all.find((t) => t.active && !t.url?.startsWith("chrome-extension://")) ?? active;
-}
-
-function notify(payload: Record<string, unknown>) {
-  return chrome.runtime.sendMessage(payload).catch(() => undefined);
 }

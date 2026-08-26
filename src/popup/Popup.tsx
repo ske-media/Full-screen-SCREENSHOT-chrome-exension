@@ -10,10 +10,11 @@ const isExtension = typeof chrome !== "undefined" && Boolean(chrome.runtime?.id)
 export function Popup() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [message, setMessage] = useState(
-    "Cliquez, ne changez pas d’onglet : la page défile puis l’éditeur s’ouvre.",
+    "Restez sur cet onglet. La page défile, puis l’éditeur s’ouvre.",
   );
   const [tabLabel, setTabLabel] = useState<string | null>(null);
   const [restricted, setRestricted] = useState(false);
+  const [progress, setProgress] = useState({ current: 0, total: 1 });
 
   useEffect(() => {
     if (!isExtension) return;
@@ -26,6 +27,20 @@ export function Popup() {
         setMessage("Ouvrez un site web (http/https), pas une page chrome://.");
       }
     });
+
+    const onMsg = (msg: {
+      type?: string;
+      current?: number;
+      total?: number;
+      message?: string;
+    }) => {
+      if (msg.type !== "CAPTURE_PROGRESS") return;
+      setPhase("running");
+      setProgress({ current: msg.current ?? 0, total: msg.total ?? 1 });
+      if (msg.message) setMessage(msg.message);
+    };
+    chrome.runtime.onMessage.addListener(onMsg);
+    return () => chrome.runtime.onMessage.removeListener(onMsg);
   }, []);
 
   async function startCapture() {
@@ -43,7 +58,7 @@ export function Popup() {
     }
 
     setPhase("running");
-    setMessage("Démarrage de la capture…");
+    setMessage("Capture en cours, ne fermez pas ce popup…");
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       const res = await chrome.runtime.sendMessage({
@@ -55,7 +70,8 @@ export function Popup() {
         setMessage(res.error ?? "Impossible de démarrer la capture.");
         return;
       }
-      window.close();
+      setPhase("done");
+      setMessage("Capture terminée. Ouverture de l’éditeur…");
     } catch (err) {
       setPhase("error");
       setMessage(
@@ -65,6 +81,8 @@ export function Popup() {
       );
     }
   }
+
+  const ratio = progress.total > 0 ? Math.min(1, progress.current / progress.total) : 0;
 
   return (
     <div className="popup-root bg-[#0c0e14] p-4 text-zinc-100">
@@ -99,6 +117,20 @@ export function Popup() {
           "Capturer la page entière"
         )}
       </Button>
+
+      {phase === "running" && (
+        <div className="mt-3">
+          <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
+            <div
+              className="h-full rounded-full bg-indigo-500 transition-all"
+              style={{ width: `${Math.round(ratio * 100)}%` }}
+            />
+          </div>
+          <p className="mt-2 text-center text-[11px] text-zinc-500">
+            {progress.current}/{progress.total || "?"} · Ne fermez pas ce popup
+          </p>
+        </div>
+      )}
 
       <p
         className={
