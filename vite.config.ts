@@ -9,7 +9,16 @@ const root = dirname(fileURLToPath(import.meta.url));
 export default defineConfig({
   // Chemins relatifs indispensables pour les pages chrome-extension://
   base: "./",
-  plugins: [react(), tailwindcss()],
+  plugins: [
+    react(),
+    tailwindcss(),
+    {
+      name: "extension-html",
+      transformIndexHtml(html) {
+        return html.replaceAll(" crossorigin", "");
+      },
+    },
+  ],
   server: {
     host: "127.0.0.1",
     port: 43123,
@@ -23,6 +32,7 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true,
+    modulePreload: false,
     rollupOptions: {
       input: {
         popup: resolve(root, "popup.html"),

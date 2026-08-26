@@ -6,6 +6,8 @@ Extension Google Chrome (Manifest V3) pour capturer une **page web entière**, l
 
 L’archive **[full-page-capture.zip](./full-page-capture.zip)** contient l’extension déjà compilée. Chrome n’accepte pas un `.zip` déposé tel quel : il faut le **décompresser**, puis charger le dossier.
 
+Si une version précédente est déjà chargée : sur `chrome://extensions`, cliquez sur **Recharger** (icône circulaire), ou retirez-la puis rechargez le dossier.
+
 1. Téléchargez et **décompressez** `full-page-capture.zip`
 2. Ouvrez `chrome://extensions`
 3. Activez le **Mode développeur** (en haut à droite)

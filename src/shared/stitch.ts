@@ -1,13 +1,8 @@
 /**
  * Assemblage (stitch) des captures viewport en une image pleine page.
  *
- * Chaque tranche est dessinée à la position Y correspondant au scroll CSS,
- * convertie en pixels device. La dernière tranche, souvent recouverte d'un
- * chevauchement, est collée par-dessus : c'est elle qui porte le bas réel
- * de la page.
- *
- * Si le canvas dépasse les limites du moteur (dimension ou nombre de pixels),
- * l'image est réduite proportionnellement.
+ * Préfère un <canvas> DOM (éditeur) : plus stable qu'OffscreenCanvas dans
+ * le service worker, qui peut tuer le SW sur une image trop lourde.
  */
 import { MAX_CANVAS_DIM, MAX_CANVAS_PIXELS } from "./types";
 
@@ -29,6 +24,33 @@ export type StitchResult = {
   height: number;
   scaled: boolean;
 };
+
+function createCanvas(width: number, height: number) {
+  if (typeof document !== "undefined") {
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Canvas 2D indisponible.");
+    return { canvas, ctx };
+  }
+  const canvas = new OffscreenCanvas(width, height);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("OffscreenCanvas 2D indisponible.");
+  return { canvas, ctx };
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement | OffscreenCanvas): Promise<Blob> {
+  if ("convertToBlob" in canvas && typeof canvas.convertToBlob === "function") {
+    return canvas.convertToBlob({ type: "image/png" });
+  }
+  return new Promise((resolve, reject) => {
+    (canvas as HTMLCanvasElement).toBlob((blob) => {
+      if (!blob) reject(new Error("Export PNG du canvas impossible."));
+      else resolve(blob);
+    }, "image/png");
+  });
+}
 
 export async function stitchSlices(
   slices: Slice[],
@@ -64,12 +86,7 @@ export async function stitchSlices(
     const outW = Math.max(1, Math.round(fullWidth * scale));
     const outH = Math.max(1, Math.round(fullHeight * scale));
 
-    const canvas = new OffscreenCanvas(outW, outH);
-    const ctx = canvas.getContext("2d");
-    if (!ctx) {
-      throw new Error("OffscreenCanvas 2D indisponible dans le service worker.");
-    }
-
+    const { canvas, ctx } = createCanvas(outW, outH);
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
     ctx.fillStyle = "#ffffff";
@@ -82,7 +99,7 @@ export async function stitchSlices(
       ctx.drawImage(bmp, 0, destY, destW, destH);
     }
 
-    const blob = await canvas.convertToBlob({ type: "image/png" });
+    const blob = await canvasToBlob(canvas);
     return { blob, width: outW, height: outH, scaled: scale < 0.999 };
   } finally {
     for (const { bmp } of bitmaps) {

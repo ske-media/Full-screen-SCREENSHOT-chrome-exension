@@ -29,11 +29,17 @@ chrome.runtime.onMessage.addListener(
     runCapture(message.tabId)
       .catch((err: unknown) => {
         const text = err instanceof Error ? err.message : String(err);
+        void chrome.storage.local.set({ lastCaptureError: text });
         void notify({ type: "CAPTURE_ERROR", message: text });
+        void openEditor({ error: text });
+        void chrome.action.setBadgeBackgroundColor({ color: "#b91c1c" });
+        void chrome.action.setBadgeText({ text: "ERR" });
       })
       .finally(() => {
         capturing = false;
-        void chrome.action.setBadgeText({ text: "" });
+        setTimeout(() => {
+          void chrome.action.setBadgeText({ text: "" });
+        }, 4000);
       });
 
     sendResponse({ ok: true });
@@ -48,6 +54,9 @@ async function runCapture(tabId?: number) {
 
   if (tab.windowId !== undefined) {
     await chrome.windows.update(tab.windowId, { focused: true });
+  }
+  if (tab.id !== undefined) {
+    await chrome.tabs.update(tab.id, { active: true });
   }
 
   await chrome.action.setBadgeBackgroundColor({ color: "#4f46e5" });
@@ -64,11 +73,18 @@ async function runCapture(tabId?: number) {
   });
 
   await notify({ type: "CAPTURE_DONE", captureId: result.id });
+  await openEditor({ id: result.id });
+}
 
-  const editorUrl = chrome.runtime.getURL(
-    `editor.html?id=${encodeURIComponent(result.id)}`,
-  );
-  await chrome.tabs.create({ url: editorUrl });
+function editorPageUrl(params: { id?: string; error?: string }) {
+  const url = new URL(chrome.runtime.getURL("editor.html"));
+  if (params.id) url.searchParams.set("id", params.id);
+  if (params.error) url.searchParams.set("error", params.error);
+  return url.toString();
+}
+
+async function openEditor(params: { id?: string; error?: string }) {
+  await chrome.tabs.create({ url: editorPageUrl(params), active: true });
 }
 
 async function resolveTargetTab() {

@@ -29,9 +29,25 @@ export type BackgroundMessage =
   | { type: "START_CAPTURE" }
   | { type: "GET_CAPTURE_STATUS" };
 
+export type SliceRecord = {
+  blob: Blob;
+  y: number;
+};
+
+export type StitchMetrics = {
+  viewportWidth: number;
+  viewportHeight: number;
+  pageWidth: number;
+  pageHeight: number;
+};
+
 export type StoredCapture = {
   id: string;
-  blob: Blob;
+  /** Image assemblée (remplie par l'éditeur, ou par un stitch réussi). */
+  blob?: Blob;
+  /** Tranches brutes si l'assemblage n'a pas encore eu lieu. */
+  slices?: SliceRecord[];
+  metrics?: StitchMetrics;
   width: number;
   height: number;
   scaled: boolean;
@@ -39,6 +55,7 @@ export type StoredCapture = {
   title: string;
   url: string;
   createdAt: number;
+  error?: string;
 };
 
 export const MAX_CANVAS_DIM = 16384;

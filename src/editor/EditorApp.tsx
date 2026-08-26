@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Button } from "../components/ui/button";
-import { getCapture, getLatestCapture } from "../shared/idb";
+import { getCapture, getLatestCapture, saveCapture } from "../shared/idb";
+import { stitchSlices } from "../shared/stitch";
 import { createDemoImage } from "./demo-image";
 import { cropImage, translateAnnotations } from "./draw";
 import { EditorCanvas } from "./EditorCanvas";
@@ -10,11 +11,17 @@ import type { Annotation, CropRect, Tool } from "./types";
 
 type Props = {
   captureId?: string | null;
+  loadError?: string | null;
   demo?: boolean;
   banner?: string | null;
 };
 
-export function EditorApp({ captureId, demo = false, banner = null }: Props) {
+export function EditorApp({
+  captureId,
+  loadError = null,
+  demo = false,
+  banner = null,
+}: Props) {
   const [image, setImage] = useState<HTMLImageElement | null>(null);
   const [meta, setMeta] = useState<{
     title: string;
@@ -57,22 +64,63 @@ export function EditorApp({ captureId, demo = false, banner = null }: Props) {
           return;
         }
 
+        if (loadError && !captureId) {
+          setError(loadError);
+          setStatus("error");
+          return;
+        }
+
         const id = captureId;
         const record = id ? await getCapture(id) : await getLatestCapture();
         if (cancelled) return;
         if (!record) {
+          if (loadError) {
+            setError(loadError);
+            setStatus("error");
+            return;
+          }
           setStatus("empty");
           return;
         }
-        const img = await blobToImage(record.blob);
+        if (record.error && !record.blob && !record.slices?.length) {
+          setError(record.error);
+          setStatus("error");
+          return;
+        }
+
+        let blob = record.blob;
+        let width = record.width;
+        let height = record.height;
+        let scaled = record.scaled;
+        if (!blob && record.slices?.length && record.metrics) {
+          const stitched = await stitchSlices(record.slices, record.metrics);
+          blob = stitched.blob;
+          width = stitched.width;
+          height = stitched.height;
+          scaled = stitched.scaled;
+          await saveCapture({
+            ...record,
+            blob,
+            slices: undefined,
+            width,
+            height,
+            scaled,
+          });
+        }
+        if (!blob) {
+          setError("La capture ne contient aucune image.");
+          setStatus("error");
+          return;
+        }
+        const img = await blobToImage(blob);
         if (cancelled) return;
         setImage(img);
         setMeta({
           title: record.title,
-          scaled: record.scaled,
+          scaled,
           truncated: record.truncated,
-          width: record.width,
-          height: record.height,
+          width,
+          height,
         });
         setStatus("ready");
       } catch (err) {
@@ -85,7 +133,7 @@ export function EditorApp({ captureId, demo = false, banner = null }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [captureId, demo]);
+  }, [captureId, demo, loadError]);
 
   const filename = useMemo(
     () => slugifyFilename(meta?.title ?? "capture"),
@@ -228,7 +276,7 @@ export function EditorApp({ captureId, demo = false, banner = null }: Props) {
         {status === "loading" && (
           <Centered>
             <Spinner />
-            <p className="mt-3 text-sm text-zinc-400">Chargement de la capture…</p>
+            <p className="mt-3 text-sm text-zinc-400">Assemblage de la capture…</p>
           </Centered>
         )}
         {status === "error" && (

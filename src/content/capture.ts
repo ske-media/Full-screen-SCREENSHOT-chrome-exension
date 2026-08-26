@@ -185,7 +185,7 @@ async function handleMessage(
     }
     case "SCROLL_TO": {
       scrollToY(msg.y ?? 0);
-      await waitForPaint(180);
+      await waitForPaint(280);
       return getPageMetrics();
     }
     case "HIDE_FIXED": {
