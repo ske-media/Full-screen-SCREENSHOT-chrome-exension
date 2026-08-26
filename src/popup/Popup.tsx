@@ -9,9 +9,11 @@ const isExtension = typeof chrome !== "undefined" && Boolean(chrome.runtime?.id)
 
 export function Popup() {
   const [phase, setPhase] = useState<Phase>("idle");
-  const [message, setMessage] = useState("L’onglet actif sera parcouru de haut en bas, puis l’éditeur s’ouvrira.");
-  const [progress, setProgress] = useState({ current: 0, total: 1 });
+  const [message, setMessage] = useState(
+    "Cliquez, ne changez pas d’onglet : la page défile puis l’éditeur s’ouvre.",
+  );
   const [tabLabel, setTabLabel] = useState<string | null>(null);
+  const [restricted, setRestricted] = useState(false);
 
   useEffect(() => {
     if (!isExtension) return;
@@ -20,54 +22,28 @@ export function Popup() {
       if (!tab) return;
       setTabLabel(tab.title ?? tab.url ?? null);
       if (tab.url && isRestrictedUrl(tab.url)) {
-        setPhase("error");
-        setMessage("Cette page système ne peut pas être capturée.");
+        setRestricted(true);
+        setMessage("Ouvrez un site web (http/https), pas une page chrome://.");
       }
     });
-
-    const listener = (msg: {
-      type?: string;
-      current?: number;
-      total?: number;
-      message?: string;
-    }) => {
-      if (msg.type === "CAPTURE_PROGRESS") {
-        setPhase("running");
-        setProgress({ current: msg.current ?? 0, total: msg.total ?? 1 });
-        if (msg.message) setMessage(msg.message);
-      }
-      if (msg.type === "CAPTURE_DONE") {
-        setPhase("done");
-        setMessage("Capture assemblée. Ouverture de l’éditeur…");
-        window.close();
-      }
-      if (msg.type === "CAPTURE_ERROR") {
-        setPhase("error");
-        setMessage(msg.message ?? "La capture a échoué.");
-      }
-    };
-
-    chrome.runtime.onMessage.addListener(listener);
-    chrome.runtime.sendMessage({ type: "GET_CAPTURE_STATUS" }).then((res) => {
-      if (res?.capturing) {
-        setPhase("running");
-        setMessage("Capture en cours…");
-      }
-    }).catch(() => undefined);
-
-    return () => chrome.runtime.onMessage.removeListener(listener);
   }, []);
 
   async function startCapture() {
     if (!isExtension) {
       setPhase("error");
       setMessage(
-        "Le popup fonctionne dans Chrome une fois l’extension chargée (chrome://extensions → Mode développeur → Charger l’extension non empaquetée).",
+        "Chargez le dossier décompressé via chrome://extensions → Mode développeur → Charger l’extension non empaquetée.",
       );
       return;
     }
+    if (restricted) {
+      setPhase("error");
+      setMessage("Ouvrez un site web (http/https), pas une page chrome://.");
+      return;
+    }
+
     setPhase("running");
-    setMessage("Préparation de la page…");
+    setMessage("Démarrage de la capture…");
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       const res = await chrome.runtime.sendMessage({
@@ -77,15 +53,18 @@ export function Popup() {
       if (res && res.ok === false) {
         setPhase("error");
         setMessage(res.error ?? "Impossible de démarrer la capture.");
+        return;
       }
+      window.close();
     } catch (err) {
       setPhase("error");
-      setMessage(err instanceof Error ? err.message : String(err));
+      setMessage(
+        err instanceof Error
+          ? err.message
+          : "Le service worker ne répond pas. Sur chrome://extensions, cliquez sur Recharger.",
+      );
     }
   }
-
-  const ratio =
-    progress.total > 0 ? Math.min(1, progress.current / progress.total) : 0;
 
   return (
     <div className="popup-root bg-[#0c0e14] p-4 text-zinc-100">
@@ -108,7 +87,7 @@ export function Popup() {
       <Button
         className="w-full"
         size="lg"
-        disabled={phase === "running" || (phase === "error" && message.includes("système"))}
+        disabled={phase === "running"}
         onClick={() => void startCapture()}
       >
         {phase === "running" ? (
@@ -120,20 +99,6 @@ export function Popup() {
           "Capturer la page entière"
         )}
       </Button>
-
-      {phase === "running" && (
-        <div className="mt-3">
-          <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
-            <div
-              className="h-full rounded-full bg-indigo-500 transition-all"
-              style={{ width: `${Math.round(ratio * 100)}%` }}
-            />
-          </div>
-          <p className="mt-2 text-center text-[11px] text-zinc-500">
-            {progress.current}/{progress.total || "?"} · Ne changez pas d’onglet
-          </p>
-        </div>
-      )}
 
       <p
         className={

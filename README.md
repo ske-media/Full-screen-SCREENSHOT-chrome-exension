@@ -14,7 +14,7 @@ Si une version précédente est déjà chargée : sur `chrome://extensions`, cli
 4. Cliquez sur **Charger l’extension non empaquetée**
 5. Sélectionnez le dossier `full-page-capture` (celui qui contient `manifest.json`)
 
-Cliquez ensuite sur l’icône de l’extension, puis sur **Capturer la page entière**. L’éditeur s’ouvre dans un nouvel onglet.
+        Ouvrez un site **http/https** (pas chrome://), rechargez l’extension v1.1.0, puis cliquez sur **Capturer**.
 
 ## Fonctionnalités
 

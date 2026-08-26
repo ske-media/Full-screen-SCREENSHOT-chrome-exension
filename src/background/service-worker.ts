@@ -26,6 +26,9 @@ chrome.runtime.onMessage.addListener(
     }
 
     capturing = true;
+    void chrome.action.setBadgeBackgroundColor({ color: "#4f46e5" });
+    void chrome.action.setBadgeText({ text: "…" });
+
     runCapture(message.tabId)
       .catch((err: unknown) => {
         const text = err instanceof Error ? err.message : String(err);
@@ -39,7 +42,7 @@ chrome.runtime.onMessage.addListener(
         capturing = false;
         setTimeout(() => {
           void chrome.action.setBadgeText({ text: "" });
-        }, 4000);
+        }, 5000);
       });
 
     sendResponse({ ok: true });
@@ -47,33 +50,37 @@ chrome.runtime.onMessage.addListener(
 );
 
 async function runCapture(tabId?: number) {
-  const tab = tabId ? await chrome.tabs.get(tabId) : await resolveTargetTab();
-  if (!tab) {
-    throw new Error("Aucun onglet actif à capturer.");
-  }
+  const stopKeepAlive = startKeepAlive();
+  try {
+    // Laisse le popup se fermer pour que l'onglet soit vraiment visible.
+    await delay(350);
 
-  if (tab.windowId !== undefined) {
-    await chrome.windows.update(tab.windowId, { focused: true });
-  }
-  if (tab.id !== undefined) {
-    await chrome.tabs.update(tab.id, { active: true });
-  }
+    const tab = tabId ? await chrome.tabs.get(tabId) : await resolveTargetTab();
+    if (!tab?.id) {
+      throw new Error("Aucun onglet actif à capturer.");
+    }
 
-  await chrome.action.setBadgeBackgroundColor({ color: "#4f46e5" });
-
-  const result = await captureFullPage(tab, ({ current, total, message }) => {
-    const pct = total > 0 ? Math.round((current / total) * 100) : 0;
-    void chrome.action.setBadgeText({ text: `${Math.min(99, pct)}` });
-    void notify({
-      type: "CAPTURE_PROGRESS",
-      current,
-      total,
-      message,
+    const result = await captureFullPage(tab, ({ current, total }) => {
+      const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+      void chrome.action.setBadgeText({ text: `${Math.min(99, pct)}` });
     });
-  });
 
-  await notify({ type: "CAPTURE_DONE", captureId: result.id });
-  await openEditor({ id: result.id });
+    await notify({ type: "CAPTURE_DONE", captureId: result.id });
+    await openEditor({ id: result.id });
+  } finally {
+    stopKeepAlive();
+  }
+}
+
+function startKeepAlive() {
+  const timer = setInterval(() => {
+    void chrome.runtime.getPlatformInfo();
+  }, 4000);
+  return () => clearInterval(timer);
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function editorPageUrl(params: { id?: string; error?: string }) {
@@ -100,7 +107,5 @@ async function resolveTargetTab() {
 }
 
 function notify(payload: Record<string, unknown>) {
-  return chrome.runtime.sendMessage(payload).catch(() => {
-    // Le popup est souvent fermé pendant la capture : ignorer.
-  });
+  return chrome.runtime.sendMessage(payload).catch(() => undefined);
 }

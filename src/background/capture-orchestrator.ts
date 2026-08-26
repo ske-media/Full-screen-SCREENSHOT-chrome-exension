@@ -1,36 +1,67 @@
 /**
- * Orchestre la capture pleine page :
- * 1. injecte le content script
- * 2. prépare le DOM (scroll en haut, masquage scrollbars)
- * 3. capture chaque viewport via chrome.tabs.captureVisibleTab
- * 4. masque header/footer fixed après la 1re tranche
- * 5. enregistre les tranches dans IndexedDB (l'éditeur fait le stitch)
+ * Orchestre la capture pleine page via executeScript (pas de content script
+ * persistant : ça reste fiable après un rechargement de l'extension).
  */
 import { saveCapture } from "../shared/idb";
 import type { Slice } from "../shared/stitch";
-import { FPC_CHANNEL, MAX_SLICES, type ContentRequest, type PageMetrics } from "../shared/types";
+import { MAX_SLICES } from "../shared/types";
 import { isRestrictedUrl } from "../shared/urls";
-
-async function sendToTab<T>(tabId: number, message: ContentRequest): Promise<T> {
-  let lastError: unknown;
-  for (let attempt = 0; attempt < 4; attempt++) {
-    try {
-      return (await chrome.tabs.sendMessage(tabId, message)) as T;
-    } catch (err) {
-      lastError = err;
-      await delay(150);
-    }
-  }
-  throw lastError instanceof Error
-    ? lastError
-    : new Error("Le script de capture n'a pas pu communiquer avec la page.");
-}
+import {
+  injectCleanup,
+  injectHideFixed,
+  injectPrepare,
+  injectScrollTo,
+  type InjectedMetrics,
+} from "./page-inject";
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** data: URLs : fetch() est parfois bloqué dans un service worker. */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(label)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err: unknown) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
+async function runInPage<T>(
+  tabId: number,
+  func: () => T | Promise<T>,
+): Promise<T> {
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func,
+  });
+  const first = results[0];
+  if (!first) throw new Error("La page n'a pas répondu.");
+  return first.result as T;
+}
+
+async function runInPageArg<A, T>(
+  tabId: number,
+  func: (arg: A) => T | Promise<T>,
+  arg: A,
+): Promise<T> {
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func,
+    args: [arg],
+  });
+  const first = results[0];
+  if (!first) throw new Error("La page n'a pas répondu.");
+  return first.result as T;
+}
+
 function dataUrlToBlob(dataUrl: string): Blob {
   const comma = dataUrl.indexOf(",");
   if (comma < 0) throw new Error("Capture d'écran invalide.");
@@ -43,28 +74,20 @@ function dataUrlToBlob(dataUrl: string): Blob {
   return new Blob([bytes], { type: mime });
 }
 
-async function captureVisible(windowId: number, tabId: number): Promise<string> {
+async function captureVisible(windowId: number): Promise<string> {
   let lastError: unknown;
-  for (let attempt = 0; attempt < 5; attempt++) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await delay(400 * attempt);
     try {
-      await chrome.tabs.update(tabId, { active: true });
-      if (attempt > 0) await delay(350 * attempt);
-      const dataUrl = await chrome.tabs.captureVisibleTab(windowId, { format: "png" });
+      const dataUrl = await withTimeout(
+        chrome.tabs.captureVisibleTab(windowId, { format: "png" }),
+        2500,
+        "Délai dépassé pendant la photo de l'onglet.",
+      );
       if (dataUrl && dataUrl.startsWith("data:")) return dataUrl;
       lastError = new Error("Capture vide.");
     } catch (err) {
       lastError = err;
-      try {
-        const fallbackWin = await chrome.windows.getLastFocused();
-        if (fallbackWin.id !== undefined && fallbackWin.id !== windowId) {
-          const fallback = await chrome.tabs.captureVisibleTab(fallbackWin.id, {
-            format: "png",
-          });
-          if (fallback && fallback.startsWith("data:")) return fallback;
-        }
-      } catch (fallbackErr) {
-        lastError = fallbackErr;
-      }
     }
   }
   const detail = lastError instanceof Error ? lastError.message : String(lastError ?? "");
@@ -94,23 +117,13 @@ export async function captureFullPage(
 
   if (!url || isRestrictedUrl(url)) {
     throw new Error(
-      "Cette page ne peut pas être capturée (page système Chrome ou Web Store).",
+      "Cette page ne peut pas être capturée (page système Chrome ou Web Store). Ouvrez un site http(s).",
     );
   }
 
-  await chrome.scripting.executeScript({
-    target: { tabId },
-    files: ["content.js"],
-  });
+  onProgress({ current: 0, total: 1, message: "Préparation de la page…" });
 
-  const metrics = await sendToTab<PageMetrics>(tabId, {
-    channel: FPC_CHANNEL,
-    type: "PREPARE",
-  });
-  if (metrics.error) {
-    throw new Error(metrics.error);
-  }
-
+  const metrics = await runInPage<InjectedMetrics>(tabId, injectPrepare);
   const slices: Slice[] = [];
   let truncated = false;
 
@@ -138,28 +151,19 @@ export async function captureFullPage(
           message: `Capture de la section ${index + 1}…`,
         });
 
-        await chrome.tabs.update(tabId, { active: true });
-        const scrolled = await sendToTab<PageMetrics>(tabId, {
-          channel: FPC_CHANNEL,
-          type: "SCROLL_TO",
-          y,
-        });
-        if (scrolled.pageHeight) {
-          pageHeight = scrolled.pageHeight;
-        }
+        const scrolled = await runInPageArg(tabId, injectScrollTo, y);
+        if (scrolled.pageHeight) pageHeight = scrolled.pageHeight;
 
         if (index > 0 && !fixedHidden) {
-          await sendToTab(tabId, { channel: FPC_CHANNEL, type: "HIDE_FIXED" });
+          await runInPage(tabId, injectHideFixed);
           fixedHidden = true;
         }
 
-        const dataUrl = await captureVisible(windowId, tabId);
+        const dataUrl = await captureVisible(windowId);
         slices.push({ blob: dataUrlToBlob(dataUrl), y });
         index += 1;
 
-        if (y + viewportHeight >= pageHeight - 1) {
-          break;
-        }
+        if (y + viewportHeight >= pageHeight - 1) break;
 
         const nextY = y + viewportHeight;
         if (nextY + viewportHeight > pageHeight) {
@@ -210,7 +214,7 @@ export async function captureFullPage(
     return { id, truncated, sliceCount: slices.length };
   } finally {
     try {
-      await sendToTab(tabId, { channel: FPC_CHANNEL, type: "CLEANUP" });
+      await runInPage(tabId, injectCleanup);
     } catch {
       // La page a pu naviguer pendant la capture.
     }

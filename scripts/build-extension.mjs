@@ -20,7 +20,7 @@ await esbuild.build({
   entryPoints: ["src/background/service-worker.ts"],
   bundle: true,
   outfile: "dist/background.js",
-  format: "esm",
+  format: "iife",
   platform: "browser",
   target: "chrome120",
   logLevel: "info",

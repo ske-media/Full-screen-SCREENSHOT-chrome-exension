@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Full Page Capture",
   "short_name": "FPCapture",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Capturez une page web entière, annotez-la (recadrage, dessin, formes, texte) et exportez-la en PNG, JPG ou PDF.",
   "permissions": [
     "activeTab",
@@ -14,8 +14,7 @@
   ],
   "host_permissions": ["<all_urls>"],
   "background": {
-    "service_worker": "background.js",
-    "type": "module"
+    "service_worker": "background.js"
   },
   "action": {
     "default_title": "Capturer la page entière",
