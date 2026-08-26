@@ -3,6 +3,7 @@
  * après le build Vite des pages HTML/React.
  */
 import * as esbuild from "esbuild";
+import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -43,4 +44,12 @@ for (const file of required) {
   }
 }
 
-console.log("Extension assemblée dans dist/");
+const pack = spawnSync(process.execPath, [join(root, "scripts/pack-zip.mjs")], {
+  cwd: root,
+  stdio: "inherit",
+});
+if (pack.status !== 0) {
+  process.exit(pack.status ?? 1);
+}
+
+console.log("Extension assemblée dans dist/ et full-page-capture.zip");
